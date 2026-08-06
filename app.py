@@ -1,73 +1,84 @@
 from flask import Flask, request, jsonify
-import gpxpy
-import io
 from flask_cors import CORS
+import gpxpy
+import gpxpy.gpx
 
 app = Flask(__name__)
 CORS(app)
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
     return "SportDataSense Backend OK"
 
 @app.route("/process", methods=["POST"])
 def process_gpx():
     if "gpxfile" not in request.files:
-        return jsonify({"error": "Nessun file inviato"}), 400
-
+        return jsonify({"error": "Nessun file caricato"}), 400
+    
     file = request.files["gpxfile"]
-    gpx_data = file.read().decode("utf-8")
+    
+    try:
+        gpx = gpxpy.parse(file)
+    except Exception as e:
+        return jsonify({"error": f"Errore nel parsing del GPX: {str(e)}"}), 400
 
-    gpx = gpxpy.parse(gpx_data)
-
-    lat, lon, ele, times = [], [], [], []
-    hr, cad, power, temp = [], [], [], []
+    elevations = []
+    lats = []
+    lons = []
+    hrs = []
+    cads = []
+    powers = []
+    temps = []
     logs = []
 
     for track in gpx.tracks:
         for segment in track.segments:
             for point in segment.points:
-                lat.append(point.latitude)
-                lon.append(point.longitude)
-                ele.append(point.elevation)
-                times.append(point.time.isoformat() if point.time else None)
+                # Coordinate e Altitudine
+                lats.append(point.latitude)
+                lons.append(point.longitude)
+                elevations.append(point.elevation if point.elevation is not None else 0.0)
+
+                # Estrazione Potenza (può essere un attributo diretto o in extension)
+                pw = getattr(point, 'power', None)
+                if pw is None:
+                    # Fallivo ricerca nei tag extension generici se strutturati diversamente
+                    pw = 0
+                powers.append(float(pw))
+
+                # Estrazione Estensioni Garmin (HR, Cadenza, Temperatura)
+                hr_val = 0
+                cad_val = 0
+                temp_val = 0
 
                 if point.extensions:
-                    hr_val = point.extensions.find("gpxtpx:hr")
-                    cad_val = point.extensions.find("gpxtpx:cad")
-                    power_val = point.extensions.find("power")
-                    temp_val = point.extensions.find("gpxtpx:atemp")
+                    for ext in point.extensions:
+                        # Gestione tag Garmin TrackPointExtension
+                        for child in ext:
+                            tag_name = child.tag.split('}')[-1] # Rimuove namespace XML
+                            if tag_name == 'hr':
+                                hr_val = float(child.text)
+                            elif tag_name == 'cad':
+                                cad_val = float(child.text)
+                            elif tag_name == 'atemp':
+                                temp_val = float(child.text)
 
-                    hr.append(int(hr_val.text) if hr_val is not None else None)
-                    cad.append(int(cad_val.text) if cad_val is not None else None)
-                    power.append(int(power_val.text) if power_val is not None else None)
-                    temp.append(float(temp_val.text) if temp_val is not None else None)
-                else:
-                    hr.append(None)
-                    cad.append(None)
-                    power.append(None)
-                    temp.append(None)
+                hrs.append(hr_val)
+                cads.append(cad_val)
+                temps.append(temp_val)
 
-    if all(v is None for v in hr):
-        logs.append("⚠ Il file GPX non contiene frequenza cardiaca (HR)")
-    if all(v is None for v in cad):
-        logs.append("⚠ Il file GPX non contiene cadenza")
-    if all(v is None for v in power):
-        logs.append("⚠ Il file GPX non contiene potenza")
-    if all(v is None for v in temp):
-        logs.append("⚠ Il file GPX non contiene temperatura")
+    logs.append(f"Punti totali estratti: {len(elevations)}")
 
     return jsonify({
-        "lat": lat,
-        "lon": lon,
-        "ele": ele,
-        "times": times,
-        "hr": hr,
-        "cad": cad,
-        "power": power,
-        "temp": temp,
+        "ele": elevations,
+        "lat": lats,
+        "lon": lons,
+        "hr": hrs,
+        "cad": cads,
+        "power": powers,
+        "temp": temps,
         "logs": logs
     })
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(host="0.0.0.0", port=5000)
