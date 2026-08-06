@@ -1,92 +1,92 @@
-import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import gpxpy
+import gpxpy.gpx
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-@app.route('/process', methods=['POST'])
-def process_gpx():
-    if 'gpxfile' not in request.files:
-        return jsonify({"error": "Nessun file trovato nella richiesta"}), 400
-    
-    file = request.files['gpxfile']
-    if file.filename == '':
-        return jsonify({"error": "Nome file non valido"}), 400
+@app.route("/", methods=["GET"])
+def home():
+    return "SportDataSense Backend OK"
 
-    logs = []
+@app.route("/process", methods=["POST"])
+def process_gpx():
+    if "gpxfile" not in request.files:
+        return jsonify({"error": "Nessun file caricato"}), 400
+    
+    file = request.files["gpxfile"]
+    
     try:
         gpx = gpxpy.parse(file)
-        
-        latitudes = []
-        longitudes = []
-        elevations = []
-        timestamps = []
-        heart_rates = []
-        cadences = []
-        powers = []
-        temperatures = []
-
-        total_points = 0
-
-        for track in gpx.tracks:
-            for segment in track.segments:
-                for point in segment.points:
-                    total_points += 1
-                    latitudes.append(point.latitude)
-                    longitudes.append(point.longitude)
-                    elevations.append(point.elevation if point.elevation is not None else 0.0)
-                    
-                    if point.time:
-                        timestamps.append(point.time.strftime('%H:%M:%S'))
-                    else:
-                        timestamps.append(None)
-                    
-                    hr = None
-                    cad = None
-                    power = None
-                    temp = None
-
-                    if point.extensions:
-                        for ext in point.extensions:
-                            for child in ext:
-                                tag_lower = child.tag.lower()
-                                if 'hr' in tag_lower or 'heartrate' in tag_lower:
-                                    try: hr = float(child.text)
-                                    except: pass
-                                elif 'cad' in tag_lower:
-                                    try: cad = float(child.text)
-                                    except: pass
-                                elif 'power' in tag_lower or 'watts' in tag_lower:
-                                    try: power = float(child.text)
-                                    except: pass
-                                elif 'atemp' in tag_lower or 'temp' in tag_lower:
-                                    try: temp = float(child.text)
-                                    except: pass
-
-                    heart_rates.append(hr)
-                    cadences.append(cad)
-                    powers.append(power)
-                    temperatures.append(temp)
-
-        logs.append(f"Letti {total_points} punti dalla traccia GPX.")
-
-        return jsonify({
-            "lat": latitudes,
-            "lon": longitudes,
-            "ele": elevations,
-            "time": timestamps,
-            "hr": heart_rates,
-            "cad": cadences,
-            "power": powers,
-            "temp": temperatures,
-            "logs": logs
-        })
-
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Errore nel parsing del GPX: {str(e)}"}), 400
 
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    elevations = []
+    lats = []
+    lons = []
+    timestamps = []
+    hrs = []
+    cads = []
+    powers = []
+    temps = []
+    logs = []
+
+    for track in gpx.tracks:
+        for segment in track.segments:
+            for point in segment.points:
+                # Coordinate e Altitudine
+                lats.append(point.latitude)
+                lons.append(point.longitude)
+                elevations.append(point.elevation if point.elevation is not None else 0.0)
+
+                # Estrazione Timestamp (formattato come HH:MM:SS)
+                if point.time:
+                    time_str = point.time.strftime("%H:%M:%S")
+                else:
+                    time_str = ""
+                timestamps.append(time_str)
+
+                # Estrazione Potenza
+                pw = getattr(point, 'power', None)
+                if pw is None:
+                    pw = 0
+                powers.append(float(pw))
+
+                # Estrazione Estensioni Garmin (HR, Cadenza, Temperatura)
+                hr_val = 0
+                cad_val = 0
+                temp_val = 0
+
+                if point.extensions:
+                    for ext in point.extensions:
+                        for child in ext:
+                            tag_name = child.tag.split('}')[-1]
+                            if tag_name == 'hr':
+                                hr_val = float(child.text)
+                            elif tag_name == 'cad':
+                                cad_val = float(child.text)
+                            elif tag_name == 'atemp':
+                                temp_val = float(child.text)
+
+                hrs.append(hr_val)
+                cads.append(cad_val)
+                temps.append(temp_val)
+
+    logs.append(f"Punti totali estratti: {len(elevations)}")
+
+    return jsonify({
+        "ele": elevations,
+        "lat": lats,
+        "lon": lons,
+        "time": timestamps,
+        "hr": hrs,
+        "cad": cads,
+        "power": powers,
+        "temp": temps,
+        "logs": logs
+    })
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
