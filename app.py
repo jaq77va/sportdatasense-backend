@@ -4,7 +4,7 @@ from flask_cors import CORS
 import gpxpy
 
 app = Flask(__name__)
-CORS(app)  # Abilita CORS per permettere le chiamate dal frontend
+CORS(app)
 
 @app.route('/process', methods=['POST'])
 def process_gpx():
@@ -18,7 +18,6 @@ def process_gpx():
     logs = []
     try:
         gpx = gpxpy.parse(file)
-        logs.setItem if hasattr(logs, 'setItem') else None # placeholder logica
         
         latitudes = []
         longitudes = []
@@ -39,13 +38,11 @@ def process_gpx():
                     longitudes.append(point.longitude)
                     elevations.append(point.elevation if point.elevation is not None else 0.0)
                     
-                    # Timestamp
                     if point.time:
                         timestamps.append(point.time.strftime('%H:%M:%S'))
                     else:
                         timestamps.append(None)
                     
-                    # Estensione dati (estrazione tag Garmin/GPX estesi se presenti)
                     hr = None
                     cad = None
                     power = None
@@ -53,7 +50,6 @@ def process_gpx():
 
                     if point.extensions:
                         for ext in point.extensions:
-                            # Cerca tag GPX standard o estensioni Garmin (gpxtpx / power / tcx)
                             for child in ext:
                                 tag_lower = child.tag.lower()
                                 if 'hr' in tag_lower or 'heartrate' in tag_lower:
@@ -62,7 +58,7 @@ def process_gpx():
                                 elif 'cad' in tag_lower:
                                     try: cad = float(child.text)
                                     except: pass
-                                elif 'power' in tag_lower or 'WATTS' in tag_lower.upper():
+                                elif 'power' in tag_lower or 'watts' in tag_lower:
                                     try: power = float(child.text)
                                     except: pass
                                 elif 'atemp' in tag_lower or 'temp' in tag_lower:
