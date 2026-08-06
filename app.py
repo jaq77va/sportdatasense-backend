@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import gpxpy
 import gpxpy.gpx
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -25,6 +26,7 @@ def process_gpx():
     elevations = []
     lats = []
     lons = []
+    timestamps = []
     hrs = []
     cads = []
     powers = []
@@ -39,10 +41,16 @@ def process_gpx():
                 lons.append(point.longitude)
                 elevations.append(point.elevation if point.elevation is not None else 0.0)
 
-                # Estrazione Potenza (può essere un attributo diretto o in extension)
+                # Estrazione Timestamp (formattato come HH:MM:SS)
+                if point.time:
+                    time_str = point.time.strftime("%H:%M:%S")
+                else:
+                    time_str = ""
+                timestamps.append(time_str)
+
+                # Estrazione Potenza
                 pw = getattr(point, 'power', None)
                 if pw is None:
-                    # Fallivo ricerca nei tag extension generici se strutturati diversamente
                     pw = 0
                 powers.append(float(pw))
 
@@ -53,9 +61,8 @@ def process_gpx():
 
                 if point.extensions:
                     for ext in point.extensions:
-                        # Gestione tag Garmin TrackPointExtension
                         for child in ext:
-                            tag_name = child.tag.split('}')[-1] # Rimuove namespace XML
+                            tag_name = child.tag.split('}')[-1]
                             if tag_name == 'hr':
                                 hr_val = float(child.text)
                             elif tag_name == 'cad':
@@ -73,6 +80,7 @@ def process_gpx():
         "ele": elevations,
         "lat": lats,
         "lon": lons,
+        "time": timestamps,
         "hr": hrs,
         "cad": cads,
         "power": powers,
