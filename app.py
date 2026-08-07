@@ -1,11 +1,16 @@
 from flask import Flask, request, jsonify
 import gpxpy
 from flask_cors import CORS
+import os
+from google import genai
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# AGGIUNGI QUESTA PARTE:
+# Inizializza il client Gemini
+# Assicurati che GEMINI_API_KEY sia impostata nelle variabili d'ambiente di Render
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
 @app.route("/")
 def home():
     return "SportDataSense Backend OK"
@@ -33,10 +38,8 @@ def process_gpx():
                 ele.append(point.elevation)
                 times.append(point.time.isoformat() if point.time else None)
 
-                # Estrazione estensioni Garmin
                 h, c, p, t = None, None, None, None
                 if point.extensions:
-                    # Trasforma in lista se necessario
                     exts = point.extensions if isinstance(point.extensions, list) else [point.extensions]
                     for ext in exts:
                         for child in ext:
@@ -59,39 +62,43 @@ def process_gpx():
 @app.route("/chat", methods=["POST"])
 def chat_gpx():
     req = request.json
-    question = req.get("question", "").lower()
+    question = req.get("question", "")
     gpx_data = req.get("data", {})
     
-    # Estraiamo i dati di riepilogo per dare contesto all'assistente
+    # Dati per il contesto
     elevations = gpx_data.get("ele", [])
     powers = gpx_data.get("power", [])
     hrs = gpx_data.get("hr", [])
-    cads = gpx_data.get("cad", [])
     
-    # Esempio di logica di risposta basata sui dati del GPX
-    answer = "Non ho abbastanza dati per rispondere a questa domanda."
+    # Creiamo un riassunto dei dati per l'IA
+    valid_ele = [e for e in elevations if e is not None]
+    valid_pow = [p for p in powers if p is not None]
+    valid_hr = [h for h in hrs if h is not None]
+
+    context = f"""
+    Sei l'assistente esperto di Sport Data Sense. Analizza questa sessione sportiva:
+    - Punti traccia: {len(elevations)}
+    - Altitudine: Max {max(valid_ele) if valid_ele else 0:.1f}m, Min {min(valid_ele) if valid_ele else 0:.1f}m
+    - Potenza media: {sum(valid_pow)/len(valid_pow) if valid_pow else 0:.1f} W
+    - Frequenza cardiaca media: {sum(valid_hr)/len(valid_hr) if valid_hr else 0:.1f} bpm
     
-    if "rallentato" in question or "lento" in question or "perché" in question:
-        # Troviamo ad esempio il punto con potenza o quota minima/massima
-        if powers:
-            min_power_idx = powers.index(min([p for p in powers if p is not None] or [0]))
-            answer = f"Analizzando la traccia, hai registrato il calo di potenza/ritmo maggiore (minima potenza di {powers[min_power_idx]}W) verso il punto {min_power_idx + 1} del percorso. Potrebbe esserci stata una salita ripida o un ostacolo."
-        else:
-            answer = "Il file non contiene dati di potenza sufficienti per analizzare i rallentamenti."
-    elif "potenza" in question:
-        valid_p = [p for p in powers if p is not None]
-        avg_p = sum(valid_p) / len(valid_p) if valid_p else 0
-        max_p = max(valid_p) if valid_p else 0
-        answer = f"La tua potenza media è di {avg_p:.1f}W, con un picco massimo di {max_p}W."
-    elif "frequenza" in question or "cuore" in question or "hr" in question:
-        valid_hr = [h for h in hrs if h is not None]
-        avg_hr = sum(valid_hr) / len(valid_hr) if valid_hr else 0
-        answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm."
-    else:
-        answer = f"Ho analizzato la tua traccia di {len(elevations)} punti. Puoi chiedermi informazioni su potenza, frequenza cardiaca o sui punti in cui potresti aver rallentato."
+    Domanda dell'atleta: "{question}"
+    
+    Rispondi in modo professionale, tecnico e incoraggiante.
+    """
+
+    try:
+        # Chiamata a Gemini 2.0 Flash
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+        # AQ - model='gemini-1.5-flash',
+            contents=context,
+        )
+        answer = response.text
+    except Exception as e:
+        answer = f"Errore nell'analisi dell'assistente: {str(e)}"
 
     return jsonify({"answer": answer})
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
