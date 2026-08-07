@@ -35,9 +35,12 @@ def process_gpx():
                 if point.extensions:
                     hr_val = point.extensions.find("gpxtpx:hr")
                     cad_val = point.extensions.find("gpxtpx:cad")
+                    # power_val = point.extensions.find("gpxtpx:power") 
+                    # Sostituito la riga power_val = ... con questo blocco: per errore del server
                     power_val = point.extensions.find("gpxtpx:power")
+                    if power_val is None:
+                    power_val = point.extensions.find("power") # Backup nel caso il namespace fosse omesso
                     temp_val = point.extensions.find("gpxtpx:atemp")
-
                     hr.append(int(hr_val.text) if hr_val is not None else None)
                     cad.append(int(cad_val.text) if cad_val is not None else None)
                     power.append(int(power_val.text) if power_val is not None else None)
