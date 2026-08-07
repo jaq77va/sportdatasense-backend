@@ -5,6 +5,11 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# AGGIUNGI QUESTA PARTE:
+@app.route("/")
+def home():
+    return "SportDataSense Backend OK"
+
 @app.route("/process", methods=["POST"])
 def process_gpx():
     if "gpxfile" not in request.files:
