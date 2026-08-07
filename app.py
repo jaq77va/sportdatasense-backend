@@ -4,7 +4,8 @@ import io
 from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}) # versione più permissiva
+# Configurazione CORS estesa per evitare errori di connessione tra frontend e backend
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route("/")
 def home():
@@ -16,9 +17,13 @@ def process_gpx():
         return jsonify({"error": "Nessun file inviato"}), 400
 
     file = request.files["gpxfile"]
-    gpx_data = file.read().decode("utf-8")
-
-    gpx = gpxpy.parse(gpx_data)
+    
+    try:
+        # Lettura del file
+        gpx_data = file.read().decode("utf-8")
+        gpx = gpxpy.parse(gpx_data)
+    except Exception as e:
+        return jsonify({"error": f"Errore durante il parsing del GPX: {str(e)}"}), 400
 
     lat, lon, ele, times = [], [], [], []
     hr, cad, power, temp = [], [], [], []
@@ -33,14 +38,15 @@ def process_gpx():
                 times.append(point.time.isoformat() if point.time else None)
 
                 if point.extensions:
+                    # Estrazione dati con ricerca multipla per evitare errori di namespace
                     hr_val = point.extensions.find("gpxtpx:hr")
                     cad_val = point.extensions.find("gpxtpx:cad")
-                    # power_val = point.extensions.find("gpxtpx:power") 
-                    # Sostituito la riga power_val = ... con questo blocco: per errore del server
+                    # Correzione: cerchiamo prima con il namespace, poi senza
                     power_val = point.extensions.find("gpxtpx:power")
                     if power_val is None:
-                    power_val = point.extensions.find("power") # Backup nel caso il namespace fosse omesso
+                        power_val = point.extensions.find("power")
                     temp_val = point.extensions.find("gpxtpx:atemp")
+
                     hr.append(int(hr_val.text) if hr_val is not None else None)
                     cad.append(int(cad_val.text) if cad_val is not None else None)
                     power.append(int(power_val.text) if power_val is not None else None)
@@ -51,14 +57,9 @@ def process_gpx():
                     power.append(None)
                     temp.append(None)
 
-    if all(v is None for v in hr):
-        logs.append("⚠ Il file GPX non contiene frequenza cardiaca (HR)")
-    if all(v is None for v in cad):
-        logs.append("⚠ Il file GPX non contiene cadenza")
+    # Logging per debug lato server
     if all(v is None for v in power):
-        logs.append("⚠ Il file GPX non contiene potenza")
-    if all(v is None for v in temp):
-        logs.append("⚠ Il file GPX non contiene temperatura")
+        logs.append("⚠ Il file GPX non contiene dati di potenza validi.")
 
     return jsonify({
         "lat": lat,
@@ -73,4 +74,5 @@ def process_gpx():
     })
 
 if __name__ == "__main__":
+    # Il porto 10000 è corretto per Render
     app.run(host="0.0.0.0", port=10000)
