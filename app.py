@@ -90,8 +90,8 @@ def chat_gpx():
     try:
         # Chiamata a Gemini 2.0 Flash
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
-        # AQ - model='gemini-1.5-flash',
+        # AQ -model='gemini-2.0-flash',
+        model='gemini-1.5-flash',
             contents=context,
         )
         answer = response.text
