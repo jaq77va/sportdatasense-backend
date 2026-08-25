@@ -7,7 +7,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route("/")
 def home():
-    return "SportDataSense Backend OK[cite: 1]"
+    return "SportDataSense Backend OK"[cite: 1]
 
 @app.route("/process", methods=["POST"])
 def process_gpx():
@@ -59,7 +59,7 @@ def chat_gpx():
     req = request.json
     question = req.get("question", "").lower()
     gpx_data = req.get("data", {})
-    bio_data = req.get("biomechanical_data", None) # Riceve i dati dei marker video
+    bio_data = req.get("biomechanical_data", None)  # Riceve i dati dei marker video
     
     # Estraiamo i dati di riepilogo per dare contesto all'assistente GPX
     elevations = gpx_data.get("ele", []) if gpx_data else []
@@ -90,7 +90,7 @@ def chat_gpx():
                 summary += "Nessun dato di movimento registrato."
             marker_summaries.append(summary)
         
-       answer = f"Analisi biomeccanica completa (Assi X, Y, Z):\n" + "\n".join(marker_summaries)
+        answer = f"Analisi biomeccanica completa (Assi X, Y, Z):\n" + "\n".join(marker_summaries)
 
     elif "rallentato" in question or "lento" in question or "perché" in question:
         if powers:
@@ -123,7 +123,6 @@ def chat_gpx():
             answer = "Non hai caricato né dati GPX né tracciato video con marker. Carica almeno una delle due fonti per iniziare."
 
     return jsonify({"answer": answer})
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
