@@ -1,19 +1,13 @@
 from flask import Flask, request, jsonify
 import gpxpy
 from flask_cors import CORS
-import os
-from google import genai
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Inizializza il client Gemini
-# Assicurati che GEMINI_API_KEY sia impostata nelle variabili d'ambiente di Render
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-
 @app.route("/")
 def home():
-    return "SportDataSense Backend OK"
+    return "SportDataSense Backend OK[cite: 1]"
 
 @app.route("/process", methods=["POST"])
 def process_gpx():
@@ -38,6 +32,7 @@ def process_gpx():
                 ele.append(point.elevation)
                 times.append(point.time.isoformat() if point.time else None)
 
+                # Estrazione estensioni Garmin
                 h, c, p, t = None, None, None, None
                 if point.extensions:
                     exts = point.extensions if isinstance(point.extensions, list) else [point.extensions]
@@ -62,43 +57,66 @@ def process_gpx():
 @app.route("/chat", methods=["POST"])
 def chat_gpx():
     req = request.json
-    question = req.get("question", "")
+    question = req.get("question", "").lower()
     gpx_data = req.get("data", {})
+    bio_data = req.get("biomechanical_data", None) # Riceve i dati dei marker video
     
-    # Dati per il contesto
-    elevations = gpx_data.get("ele", [])
-    powers = gpx_data.get("power", [])
-    hrs = gpx_data.get("hr", [])
+    # Estraiamo i dati di riepilogo per dare contesto all'assistente GPX
+    elevations = gpx_data.get("ele", []) if gpx_data else []
+    powers = gpx_data.get("power", []) if gpx_data else []
+    hrs = gpx_data.get("hr", []) if gpx_data else []
+    cads = gpx_data.get("cad", []) if gpx_data else []
     
-    # Creiamo un riassunto dei dati per l'IA
-    valid_ele = [e for e in elevations if e is not None]
-    valid_pow = [p for p in powers if p is not None]
-    valid_hr = [h for h in hrs if h is not None]
+    answer = "Non ho abbastanza dati per rispondere a questa domanda."
+    
+    # Gestione delle domande sui dati biomeccanici/video se presenti
+    if bio_data and ("marker" in question or "video" in question or "coordinata" in question or "x" in question or "andamento" in question):
+        marker_summaries = []
+        for m in bio_data:
+            m_id = m.get("marker")
+            history = m.get("history", [])
+            if history:
+                min_x = min(history)
+                max_x = max(history)
+                avg_x = sum(history) / len(history)
+                marker_summaries.append(f"Marker {m_id}: coordinata X media {avg_x:.1f} (da {min_x} a {max_x})")
+            else:
+                marker_summaries.append(f"Marker {m_id}: posizionato ma senza storico di movimento registrato.")
+        
+        answer = f"Analisi biomeccanica dei marker video:\n" + "\n".join(marker_summaries)
 
-    context = f"""
-    Sei l'assistente esperto di Sport Data Sense. Analizza questa sessione sportiva:
-    - Punti traccia: {len(elevations)}
-    - Altitudine: Max {max(valid_ele) if valid_ele else 0:.1f}m, Min {min(valid_ele) if valid_ele else 0:.1f}m
-    - Potenza media: {sum(valid_pow)/len(valid_pow) if valid_pow else 0:.1f} W
-    - Frequenza cardiaca media: {sum(valid_hr)/len(valid_hr) if valid_hr else 0:.1f} bpm
-    
-    Domanda dell'atleta: "{question}"
-    
-    Rispondi in modo professionale, tecnico e incoraggiante.
-    """
-
-    try:
-        # Chiamata a Gemini 2.0 Flash
-        response = client.models.generate_content(
-        model='gemini-3.5-flash',
-       # AQ - model='gemini-1.5-flash',
-            contents=context,
-        )
-        answer = response.text
-    except Exception as e:
-        answer = f"Errore nell'analisi dell'assistente: {str(e)}"
+    elif "rallentato" in question or "lento" in question or "perché" in question:
+        if powers:
+            min_power_idx = powers.index(min([p for p in powers if p is not None] or [0]))
+            answer = f"Analizzando la traccia, hai registrato il calo di potenza/ritmo maggiore (minima potenza di {powers[min_power_idx]}W) verso il punto {min_power_idx + 1} del percorso. Potrebbe esserci stata una salita ripida o un ostacolo."
+        else:
+            answer = "Il file non contiene dati di potenza sufficienti per analizzare i rallentamenti."
+            
+    elif "potenza" in question:
+        valid_p = [p for p in powers if p is not None]
+        avg_p = sum(valid_p) / len(valid_p) if valid_p else 0
+        max_p = max(valid_p) if valid_p else 0
+        answer = f"La tua potenza media è di {avg_p:.1f}W, con un picco massimo di {max_p}W."
+        
+    elif "frequenza" in question or "cuore" in question or "hr" in question:
+        valid_hr = [h for h in hrs if h is not None]
+        avg_hr = sum(valid_hr) / len(valid_hr) if valid_hr else 0
+        answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm."
+        
+    else:
+        parts = []
+        if elevations:
+            parts.append(f"traccia GPX di {len(elevations)} punti")
+        if bio_data:
+            parts.append(f"{len(bio_data)} marker biomeccanici tracciati")
+            
+        if parts:
+            answer = f"Ho a disposizione: {' e '.join(parts)}. Puoi chiedermi informazioni su potenza, frequenza cardiaca o sull'andamento dei marker video."
+        else:
+            answer = "Non hai caricato né dati GPX né tracciato video con marker. Carica almeno una delle due fonti per iniziare."
 
     return jsonify({"answer": answer})
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
