@@ -7,7 +7,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route("/")
 def home():
-    return "SportDataSense Backend OK"[cite: 1]
+    return "SportDataSense Backend OK"
 
 @app.route("/process", methods=["POST"])
 def process_gpx():
