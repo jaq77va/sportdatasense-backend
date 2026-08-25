@@ -69,21 +69,28 @@ def chat_gpx():
     
     answer = "Non ho abbastanza dati per rispondere a questa domanda."
     
-    # Gestione delle domande sui dati biomeccanici/video se presenti
-    if bio_data and ("marker" in question or "video" in question or "coordinata" in question or "x" in question or "andamento" in question):
+    # Gestione delle domande sui dati biomeccanici/video
+    if bio_data and any(k in question for k in ["marker", "video", "coordinata", "x", "y", "z", "andamento"]):
         marker_summaries = []
         for m in bio_data:
             m_id = m.get("marker")
-            history = m.get("history", [])
-            if history:
-                min_x = min(history)
-                max_x = max(history)
-                avg_x = sum(history) / len(history)
-                marker_summaries.append(f"Marker {m_id}: coordinata X media {avg_x:.1f} (da {min_x} a {max_x})")
+            hx = m.get("historyX", [])
+            hy = m.get("historyY", [])
+            hz = m.get("historyZ", [])
+            
+            summary = f"Marker {m_id}: "
+            if hx and hy:
+                avg_x = sum(hx) / len(hx)
+                avg_y = sum(hy) / len(hy)
+                summary += f"Media X: {avg_x:.1f}, Media Y: {avg_y:.1f}"
+                if hz:
+                    avg_z = sum(hz) / len(hz)
+                    summary += f", Media Z: {avg_z:.1f}"
             else:
-                marker_summaries.append(f"Marker {m_id}: posizionato ma senza storico di movimento registrato.")
+                summary += "Nessun dato di movimento registrato."
+            marker_summaries.append(summary)
         
-        answer = f"Analisi biomeccanica dei marker video:\n" + "\n".join(marker_summaries)
+       answer = f"Analisi biomeccanica completa (Assi X, Y, Z):\n" + "\n".join(marker_summaries)
 
     elif "rallentato" in question or "lento" in question or "perché" in question:
         if powers:
