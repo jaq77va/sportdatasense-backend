@@ -144,6 +144,7 @@ def chat_gpx():
         )
         answer = response.text
     except Exception as e:
+        print("ERRORE GEMINI CRITICAL:", str(e))
         q_lower = question.lower()
         # Fallbon sicuro ordinato correttamente per priorità di intenzione
         if any(k in q_lower for k in ["frequenza", "cuore", "hr"]):
