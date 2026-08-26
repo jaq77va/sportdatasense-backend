@@ -60,13 +60,13 @@ def process_gpx():
     })
 
 @app.route("/chat", methods=["POST"])
-@app.route("/chat", methods=["POST"])
 def chat_gpx():
     req = request.json or {}
     question = req.get("question", "")
     history = req.get("history", [])
     gpx_data = req.get("data", {})
     bio_data = req.get("biomechanical_data", None)
+    sync_view = req.get("synchronized_view", None)
     
     elevations = gpx_data.get("ele", []) if gpx_data else []
     powers = gpx_data.get("power", []) if gpx_data else []
@@ -80,22 +80,37 @@ def chat_gpx():
     avg_p = sum(valid_p) / len(valid_p) if valid_p else 0
     max_p = max(valid_p) if valid_p else 0
 
-    # Contesto sintetico ed essenziale per non sovraccaricare la richiesta
+    # Contesto sintetico di base
     context_summary = (
-        f"Statistiche traccia: Punti={len(elevations)}, "
+        f"Statistiche traccia: Punti totali={len(elevations)}, "
         f"FC Media={avg_hr:.1f}bpm (Max={max_hr}), "
         f"Potenza Media={avg_p:.1f}W (Max={max_p}), "
         f"Marker video tracciati={len(bio_data) if bio_data else 0}."
     )
 
+    # Iniezione della serie temporale dettagliata (inclusa temperatura) dalla vista sincronizzata a schermo
+    timeseries_details = ""
+    if sync_view and "labels" in sync_view:
+        labels = sync_view.get("labels", [])
+        series = sync_view.get("series", {})
+        timeseries_details = "\n\nSerie temporale dettagliata punto per punto (vista sincronizzata):\n"
+        for idx, label in enumerate(labels):
+            row_str = f"- Tempo {label}: "
+            elements_in_row = []
+            for key, values in series.items():
+                if values and idx < len(values) and values[idx] is not None:
+                    elements_in_row.append(f"{key}={values[idx]}")
+            if elements_in_row:
+                timeseries_details += row_str + ", ".join(elements_in_row) + "\n"
+
     system_instruction = (
-        "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi e biomeccanica. "
-        "Fornisci risposte strutturate e professionali basandoti sui dati sintetici forniti e sulla conversazione."
         "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi e biomeccanica. "
         "Fornisci sempre risposte estremamente curate dal punto di vista della formattazione visiva: "
         "usa generosamente elenchi puntati (*), grassetti (**...**) per evidenziare i dati chiave, "
         "e sezioni titolate per suddividere l'analisi logica. "
-        "Basati rigorosamente sui dati della traccia, sui marker biomeccanici e sulla conversazione. "
+        "Basati rigorosamente sui dati della traccia, sulla serie temporale dettagliata fornita, "
+        "sui marker biomeccanici e sulla conversazione. "
+        "Se l'utente chiede un valore a uno specifico secondo (es. 4s), cercalo direttamente nella serie temporale fornita. "
         "Se mancano dati cruciali per una stima perfetta (es. FC massima teorica, peso, tipo di vista video), "
         "segnalalo chiaramente alla fine della risposta."
     )
@@ -103,11 +118,11 @@ def chat_gpx():
     formatted_contents = []
     formatted_contents.append({
         "role": "user",
-        "parts": [{"text": f"Dati di riferimento attuali: {context_summary}"}]
+        "parts": [{"text": f"Dati di riferimento attuali: {context_summary} {timeseries_details}"}]
     })
     formatted_contents.append({
         "role": "model",
-        "parts": [{"text": "Dati ricevuti e memorizzati."}]
+        "parts": [{"text": "Dati ricevuti, indicizzazione temporale e serie analitiche memorizzate correttamente."}]
     })
 
     # Limitiamo gli ultimi scambi della history per evitare payload giganti
@@ -118,7 +133,7 @@ def chat_gpx():
         if content_text:
             formatted_contents.append({
                 "role": role,
-                "parts": [{"text": content_text[:1000]}] # Tronchiamo eventuali testi oceanici
+                "parts": [{"text": content_text[:1000]}]
             })
 
     formatted_contents.append({
@@ -132,7 +147,7 @@ def chat_gpx():
             contents=formatted_contents,
             config={
                 "system_instruction": system_instruction,
-                "temperature": 0.4,
+                "temperature": 0.2,
             }
         )
         answer = response.text
