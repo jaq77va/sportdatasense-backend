@@ -88,20 +88,38 @@ def chat_gpx():
         f"Marker video tracciati={len(bio_data) if bio_data else 0}."
     )
 
-    # Iniezione della serie temporale dettagliata (inclusa temperatura) dalla vista sincronizzata a schermo
+    # Iniezione della serie temporale dettagliata e dei marker biomeccanici dalla vista sincronizzata a schermo
     timeseries_details = ""
-    if sync_view and "labels" in sync_view:
+    if sync_view:
         labels = sync_view.get("labels", [])
         series = sync_view.get("series", {})
+        bio_series = sync_view.get("biomechanical_series", [])
+        
         timeseries_details = "\n\nSerie temporale dettagliata punto per punto (vista sincronizzata):\n"
-        for idx, label in enumerate(labels):
-            row_str = f"- Tempo {label}: "
-            elements_in_row = []
-            for key, values in series.items():
-                if values and idx < len(values) and values[idx] is not None:
-                    elements_in_row.append(f"{key}={values[idx]}")
-            if elements_in_row:
-                timeseries_details += row_str + ", ".join(elements_in_row) + "\n"
+        
+        if labels and series:
+            for idx, label in enumerate(labels):
+                row_str = f"- Tempo {label}: "
+                elements_in_row = []
+                for key, values in series.items():
+                    if values and idx < len(values) and values[idx] is not None:
+                        elements_in_row.append(f"{key}={values[idx]}")
+                if elements_in_row:
+                    timeseries_details += row_str + ", ".join(elements_in_row) + "\n"
+        
+        if bio_series:
+            timeseries_details += "\nCoordinate dei Marker Biomeccanici video punto per punto:\n"
+            for item in bio_series:
+                sec = item.get("second") or item.get("time") or "N/D"
+                markers = item.get("markers", [])
+                marker_strs = []
+                for m_idx, m_coords in enumerate(markers):
+                    if m_coords:
+                        mx = m_coords.get("x", "N/D")
+                        my = m_coords.get("y", "N/D")
+                        marker_strs.append(f"Marker {m_idx+1}(X={mx}, Y={my})")
+                if marker_strs:
+                    timeseries_details += f"- Secondo {sec}s: " + ", ".join(marker_strs) + "\n"
 
     system_instruction = (
         "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi e biomeccanica. "
@@ -110,7 +128,7 @@ def chat_gpx():
         "e sezioni titolate per suddividere l'analisi logica. "
         "Basati rigorosamente sui dati della traccia, sulla serie temporale dettagliata fornita, "
         "sui marker biomeccanici e sulla conversazione. "
-        "Se l'utente chiede un valore a uno specifico secondo (es. 4s), cercalo direttamente nella serie temporale fornita. "
+        "Se l'utente chiede un valore a uno specifico secondo (es. 4s o 5s), cercalo direttamente nella serie temporale o nelle coordinate dei marker fornite. "
         "Se mancano dati cruciali per una stima perfetta (es. FC massima teorica, peso, tipo di vista video), "
         "segnalalo chiaramente alla fine della risposta."
     )
