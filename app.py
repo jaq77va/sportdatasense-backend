@@ -135,7 +135,7 @@ def chat_gpx():
     try:
         # Chiamata al modello Gemini per una risposta fluida, contestuale e approfondita
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-3.6-flash',
             contents=formatted_contents,
             config={
                 "system_instruction": system_instruction,
