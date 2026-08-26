@@ -60,20 +60,18 @@ def process_gpx():
     })
 
 @app.route("/chat", methods=["POST"])
+@app.route("/chat", methods=["POST"])
 def chat_gpx():
     req = request.json or {}
     question = req.get("question", "")
-    history = req.get("history", []) # Riceviamo lo storico della chat dal frontend
+    history = req.get("history", [])
     gpx_data = req.get("data", {})
-    bio_data = req.get("biomechanical_data", None)  # Riceve i dati dei marker video
+    bio_data = req.get("biomechanical_data", None)
     
-    # Estraiamo i dati di riepilogo di base
     elevations = gpx_data.get("ele", []) if gpx_data else []
     powers = gpx_data.get("power", []) if gpx_data else []
     hrs = gpx_data.get("hr", []) if gpx_data else []
-    cads = gpx_data.get("cad", []) if gpx_data else []
 
-    # Calcoli statistici rapidi di supporto da passare come contesto all'AI
     valid_hr = [h for h in hrs if h is not None]
     avg_hr = sum(valid_hr) / len(valid_hr) if valid_hr else 0
     max_hr = max(valid_hr) if valid_hr else 0
@@ -82,58 +80,46 @@ def chat_gpx():
     avg_p = sum(valid_p) / len(valid_p) if valid_p else 0
     max_p = max(valid_p) if valid_p else 0
 
-    # Prepariamo un contesto riassuntivo pulito dei dati attualmente caricati
+    # Contesto sintetico ed essenziale per non sovraccaricare la richiesta
     context_summary = (
-        f"[Dati Traccia caricati]\n"
-        f"- Punti totali: {len(elevations)}\n"
-        f"- Frequenza Cardiaca Media: {avg_hr:.1f} bpm (Max: {max_hr} bpm)\n"
-        f"- Potenza Media: {avg_p:.1f}W (Max: {max_p}W)\n"
-        f"- Dati Biomeccanici Video (Marker): {len(bio_data) if bio_data else 0} marker tracciati."
+        f"Statistiche traccia: Punti={len(elevations)}, "
+        f"FC Media={avg_hr:.1f}bpm (Max={max_hr}), "
+        f"Potenza Media={avg_p:.1f}W (Max={max_p}), "
+        f"Marker video tracciati={len(bio_data) if bio_data else 0}."
     )
 
-    # Istruzione di sistema per garantire analisi profonde e indicazione dei dati mancanti
     system_instruction = (
-        "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi (GPX/FIT) "
-        "e biomeccanica. Fornisci sempre analisi approfondite, critiche e strutturate basandoti sui dati della traccia, "
-        "sui dati biomeccanici e sulla cronologia della conversazione. "
-        "Se l'utente menziona informazioni anagrafiche o personali (es. l'età), ricordale e usale per valutare parametri come la frequenza cardiaca. "
-        "Se mancano dati cruciali per darti una risposta o una stima perfetta (es. FC massima teorica, peso, soglie), "
-        "rispondi comunque in modo completo ed esaustivo con i dati che possiedi, e indica chiaramente quali metriche o informazioni "
-        "ulteriori mancherebbero per raggiungere la massima precisione."
+        "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi e biomeccanica. "
+        "Fornisci risposte strutturate e professionali basandoti sui dati sintetici forniti e sulla conversazione."
     )
 
-    # Ricostruiamo la cronologia dei messaggi per Gemini
     formatted_contents = []
-    
-    # Iniettiamo il contesto dei dati come primo messaggio di sistema/istruzione nascosta o lo accodiamo
     formatted_contents.append({
         "role": "user",
-        "parts": [{"text": f"Contesto attuale dell'atleta:\n{context_summary}\n\nTieni conto di questi dati per le risposte future."}]
+        "parts": [{"text": f"Dati di riferimento attuali: {context_summary}"}]
     })
     formatted_contents.append({
         "role": "model",
-        "parts": [{"text": "Ho memorizzato il contesto dei dati attuali. Sono pronto ad analizzarli."}]
+        "parts": [{"text": "Dati ricevuti e memorizzati."}]
     })
 
-    # Aggiungiamo lo storico reale della chat precedente (escludendo l'ultimo elemento che è la domanda corrente appena inserita nel frontend)
-    history_to_send = history[:-1] if len(history) > 0 else []
-    for message in history_to_send:
+    # Limitiamo gli ultimi scambi della history per evitare payload giganti
+    recent_history = history[-6:] if len(history) > 6 else history
+    for message in recent_history[:-1]:
         role = "user" if message.get("role") == "user" else "model"
         content_text = message.get("content", "")
         if content_text:
             formatted_contents.append({
                 "role": role,
-                "parts": [{"text": content_text}]
+                "parts": [{"text": content_text[:1000]}] # Tronchiamo eventuali testi oceanici
             })
 
-    # Aggiungiamo la domanda corrente
     formatted_contents.append({
         "role": "user",
         "parts": [{"text": question}]
     })
 
     try:
-        # Chiamata al modello Gemini per una risposta fluida, contestuale e approfondita
         response = client.models.generate_content(
             model='gemini-3.6-flash',
             contents=formatted_contents,
@@ -144,34 +130,14 @@ def chat_gpx():
         )
         answer = response.text
     except Exception as e:
-        print("ERRORE GEMINI CRITICAL:", str(e))
+        print(f"ERRORE API: {str(e)}")
         q_lower = question.lower()
-        # Fallbon sicuro ordinato correttamente per priorità di intenzione
         if any(k in q_lower for k in ["frequenza", "cuore", "hr"]):
             answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm (Max: {max_hr} bpm)."
         elif any(k in q_lower for k in ["potenza", "watt", "w"]):
             answer = f"La tua potenza media è di {avg_p:.1f}W, con un picco massimo di {max_p}W."
-        elif bio_data and any(k in q_lower for k in ["marker", "video", "coordinata", "x", "y", "z", "andamento"]):
-            marker_summaries = []
-            for m in bio_data:
-                m_id = m.get("marker")
-                hx = m.get("historyX", [])
-                hy = m.get("historyY", [])
-                hz = m.get("historyZ", [])
-                summary = f"Marker {m_id}: "
-                if hx and hy:
-                    avg_x = sum(hx) / len(hx)
-                    avg_y = sum(hy) / len(hy)
-                    summary += f"Media X: {avg_x:.1f}, Media Y: {avg_y:.1f}"
-                    if hz:
-                        avg_z = sum(hz) / len(hz)
-                        summary += f", Media Z: {avg_z:.1f}"
-                else:
-                    summary += "Nessun dato di movimento registrato."
-                marker_summaries.append(summary)
-            answer = f"Analisi biomeccanica completa (Assi X, Y, Z):\n" + "\n".join(marker_summaries)
         else:
-            answer = f"Analisi completata sui dati disponibili. (Dettaglio errore di sistema temporaneo: {str(e)})"
+            answer = f"Analisi completata sui dati disponibili. (Nota di fallback per carico server: {str(e)})"
 
     return jsonify({"answer": answer})
 
