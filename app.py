@@ -2,13 +2,14 @@ from flask import Flask, request, jsonify
 import gpxpy
 from flask_cors import CORS
 import os
+import time
 from google import genai
 from google.genai import types
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Inizializzazione client Gemini (assicurati di avere la chiave API configurata nell'ambiente su Render)
+# Inizializzazione client Gemini (assicurati di avere la chiave API configurata nell'ambiente su Render)[cite: 5]
 client = genai.Client()
 
 @app.route("/")
@@ -161,29 +162,47 @@ def chat_gpx():
                 )
             )
 
-    try:
-        # Ripristinato il tuo modello gemini-3.6-flash originario con la chat nativa
-        chat = client.chats.create(
-            model='gemini-3.6-flash',
-            history=formatted_history,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                temperature=0.2,
+    # Logica di Retry per gestire gli errori temporanei 503 / High Demand
+    max_retries = 3
+    retry_delay = 1.5
+    answer = None
+
+    for attempt in range(max_retries):
+        try:
+            chat = client.chats.create(
+                model='gemini-3.6-flash',
+                history=formatted_history,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.2,
+                )
             )
-        )
-        
-        response = chat.send_message(question)
-        answer = response.text
-        
-    except Exception as e:
-        print(f"ERRORE API: {str(e)}")
-        q_lower = question.lower()
-        if any(k in q_lower for k in ["frequenza", "cuore", "hr"]):
-            answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm (Max: {max_hr} bpm)."
-        elif any(k in q_lower for k in ["potenza", "watt", "w"]):
-            answer = f"La tua potenza media è di {avg_p:.1f}W, con un picco massimo di {max_p}W."
-        else:
-            answer = f"Analisi completata sui dati disponibili. (Nota di fallback per carico server: {str(e)})"
+            
+            response = chat.send_message(question)
+            answer = response.text
+            break # Se ha successo, usciamo dal ciclo di retry
+            
+        except Exception as e:
+            error_str = str(e)
+            print(f"Tentativo {attempt + 1} fallito - ERRORE API: {error_str}")
+            
+            # Se è un errore 503 o di alto traffico e abbiamo ancora tentativi, attendiamo e riproviamo
+            if ("503" in error_str or "UNAVAILABLE" in error_str or "high demand" in error_str) and attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Raddoppia l'attesa per il tentativo successivo (es. 1.5s -> 3s)
+                continue
+            
+            # Se i tentativi sono esauriti o è un altro tipo di errore, applichiamo il fallback
+            if attempt == max_retries - 1:
+                answer = "I server di IA sono momentaneamente sovraccarichi (503). Riprova tra qualche istante."
+            else:
+                q_lower = question.lower()
+                if any(k in q_lower for k in ["frequenza", "cuore", "hr"]):
+                    answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm (Max: {max_hr} bpm)."
+                elif any(k in q_lower for k in ["potenza", "watt", "w"]):
+                    answer = f"La tua potenza media è di {avg_p:.1f}W, con un picco massimo di {max_p}W."
+                else:
+                    answer = f"Analisi completata sui dati disponibili. (Nota di fallback per carico server: {error_str})"
 
     return jsonify({"answer": answer})
 
