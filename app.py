@@ -115,8 +115,9 @@ def chat_gpx():
         "parts": [{"text": "Ho memorizzato il contesto dei dati attuali. Sono pronto ad analizzarli."}]
     })
 
-    # Aggiungiamo lo storico reale della chat precedente
-    for message in history[:-1]: # Escludiamo l'ultima che aggiungiamo pulita sotto
+    # Aggiungiamo lo storico reale della chat precedente (escludendo l'ultimo elemento che è la domanda corrente appena inserita nel frontend)
+    history_to_send = history[:-1] if len(history) > 0 else []
+    for message in history_to_send:
         role = "user" if message.get("role") == "user" else "model"
         content_text = message.get("content", "")
         if content_text:
@@ -143,8 +144,13 @@ def chat_gpx():
         )
         answer = response.text
     except Exception as e:
-        # Fallback di sicurezza basato sulla tua logica originaria se l'API dovesse avere problemi temporanei
-        if bio_data and any(k in question.lower() for k in ["marker", "video", "coordinata", "x", "y", "z", "andamento"]):
+        q_lower = question.lower()
+        # Fallbon sicuro ordinato correttamente per priorità di intenzione
+        if any(k in q_lower for k in ["frequenza", "cuore", "hr"]):
+            answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm (Max: {max_hr} bpm)."
+        elif any(k in q_lower for k in ["potenza", "watt", "w"]):
+            answer = f"La tua potenza media è di {avg_p:.1f}W, con un picco massimo di {max_p}W."
+        elif bio_data and any(k in q_lower for k in ["marker", "video", "coordinata", "x", "y", "z", "andamento"]):
             marker_summaries = []
             for m in bio_data:
                 m_id = m.get("marker")
@@ -163,10 +169,8 @@ def chat_gpx():
                     summary += "Nessun dato di movimento registrato."
                 marker_summaries.append(summary)
             answer = f"Analisi biomeccanica completa (Assi X, Y, Z):\n" + "\n".join(marker_summaries)
-        elif "frequenza" in question.lower() or "cuore" in question.lower() or "hr" in question.lower():
-            answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm (Max: {max_hr} bpm)."
         else:
-            answer = f"La frequenza cardiaca media registrata è di {avg_hr:.1f} bpm. (Nota di fallback offline: {str(e)})"
+            answer = f"Analisi completata sui dati disponibili. (Dettaglio errore di sistema temporaneo: {str(e)})"
 
     return jsonify({"answer": answer})
 
