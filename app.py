@@ -3,6 +3,7 @@ import gpxpy
 from flask_cors import CORS
 import os
 from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -133,42 +134,47 @@ def chat_gpx():
         "segnalalo chiaramente alla fine della risposta."
     )
 
-    formatted_contents = []
-    formatted_contents.append({
-        "role": "user",
-        "parts": [{"text": f"Dati di riferimento attuali: {context_summary} {timeseries_details}"}]
-    })
-    formatted_contents.append({
-        "role": "model",
-        "parts": [{"text": "Dati ricevuti, indicizzazione temporale e serie analitiche memorizzate correttamente."}]
-    })
+    formatted_history = []
+    initial_context_text = f"Dati di riferimento attuali: {context_summary} {timeseries_details}"
+    formatted_history.append(
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=initial_context_text)]
+        )
+    )
+    formatted_history.append(
+        types.Content(
+            role="model",
+            parts=[types.Part.from_text(text="Dati ricevuti, indicizzazione temporale e serie analitiche memorizzate correttamente.")]
+        )
+    )
 
-    # Limitiamo gli ultimi scambi della history per evitare payload giganti
     recent_history = history[-6:] if len(history) > 6 else history
     for message in recent_history[:-1]:
         role = "user" if message.get("role") == "user" else "model"
         content_text = message.get("content", "")
         if content_text:
-            formatted_contents.append({
-                "role": role,
-                "parts": [{"text": content_text[:1000]}]
-            })
-
-    formatted_contents.append({
-        "role": "user",
-        "parts": [{"text": question}]
-    })
+            formatted_history.append(
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=content_text[:1000])]
+                )
+            )
 
     try:
-        response = client.models.generate_content(
+        # Ripristinato il tuo modello gemini-3.6-flash originario con la chat nativa
+        chat = client.chats.create(
             model='gemini-3.6-flash',
-            contents=formatted_contents,
-            config={
-                "system_instruction": system_instruction,
-                "temperature": 0.2,
-            }
+            history=formatted_history,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.2,
+            )
         )
+        
+        response = chat.send_message(question)
         answer = response.text
+        
     except Exception as e:
         print(f"ERRORE API: {str(e)}")
         q_lower = question.lower()
