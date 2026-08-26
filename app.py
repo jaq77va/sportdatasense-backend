@@ -12,7 +12,7 @@ client = genai.Client()
 
 @app.route("/")
 def home():
-    return "SportDataSense Backend OK"
+    return "SportDataSense Backend v2.0 - Chat con Cronologia Attiva"
 
 @app.route("/process", methods=["POST"])
 def process_gpx():
