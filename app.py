@@ -9,11 +9,12 @@ from google.genai import types
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
+# Inizializzazione client Gemini (chiave API configurata nell'ambiente su Render)
 client = genai.Client()
 
 @app.route("/")
 def home():
-    return "SportDataSense Backend v2.0 - Chat con Cronologia Attiva & Biomeccanica Angoli"
+    return "SportDataSense Backend v2.0 - Chat con Cronologia Attiva"
 
 @app.route("/process", methods=["POST"])
 def process_gpx():
@@ -38,6 +39,7 @@ def process_gpx():
                 ele.append(point.elevation)
                 times.append(point.time.isoformat() if point.time else None)
 
+                # Estrazione estensioni Garmin
                 h, c, p, t = None, None, None, None
                 if point.extensions:
                     exts = point.extensions if isinstance(point.extensions, list) else [point.extensions]
@@ -66,7 +68,6 @@ def chat_gpx():
     history = req.get("history", [])
     gpx_data = req.get("data", {})
     bio_data = req.get("biomechanical_data", None)
-    angle_data = req.get("angle_data", None) # Ricezione dati angoli articolari
     sync_view = req.get("synchronized_view", None)
     
     elevations = gpx_data.get("ele", []) if gpx_data else []
@@ -85,8 +86,7 @@ def chat_gpx():
         f"Statistiche traccia: Punti totali={len(elevations)}, "
         f"FC Media={avg_hr:.1f}bpm (Max={max_hr}), "
         f"Potenza Media={avg_p:.1f}W (Max={max_p}), "
-        f"Marker video tracciati={len(bio_data) if bio_data else 0}, "
-        f"Angoli articolari configurati={len(angle_data) if angle_data else 0}."
+        f"Dati biomeccanici/angoli registrati={len(bio_data) if bio_data else 0}."
     )
 
     timeseries_details = ""
@@ -94,7 +94,6 @@ def chat_gpx():
         labels = sync_view.get("labels", [])
         series = sync_view.get("series", {})
         bio_series = sync_view.get("biomechanical_series", [])
-        ang_series = sync_view.get("angle_series", [])
         
         timeseries_details = "\n\nSerie temporale dettagliata punto per punto (vista sincronizzata):\n"
         
@@ -109,43 +108,37 @@ def chat_gpx():
                     timeseries_details += row_str + ", ".join(elements_in_row) + "\n"
         
         if bio_series:
-            timeseries_details += "\nCoordinate dei Marker Biomeccanici video punto per punto:\n"
+            timeseries_details += "\nDati Biomeccanici (Angolo e coordinate Fulcro/Periferico) punto per punto:\n"
             for item in bio_series:
-                sec = item.get("second") or "N/D"
-                markers = item.get("markers", [])
-                marker_strs = [f"M{m_idx+1}(X={m.get('x')}, Y={m.get('y')})" for m_idx, m in enumerate(markers) if m]
-                if marker_strs:
-                    timeseries_details += f"- Secondo {sec}s: " + ", ".join(marker_strs) + "\n"
-
-        if ang_series:
-            timeseries_details += "\nValori degli Angoli Articolari (ROM) punto per punto:\n"
-            for item in ang_series:
-                sec = item.get("second") or "N/D"
-                angles = item.get("angles", [])
-                ang_strs = [f"Angolo {a_idx+1}({a.get('deg')}°)" for a_idx, a in enumerate(angles) if a and a.get('deg') is not None]
-                if ang_strs:
-                    timeseries_details += f"- Secondo {sec}s: " + ", ".join(ang_strs) + "\n"
+                sec = item.get("second") or item.get("time") or "N/D"
+                angle = item.get("angle", "N/D")
+                f_coord = item.get("fulcrum", {})
+                p_coord = item.get("peripheral", {})
+                timeseries_details += f"- Secondo {sec}s: Angolo={angle}°, Fulcro(X={f_coord.get('x')}, Y={f_coord.get('y')}), Periferico(X={p_coord.get('x')}, Y={p_coord.get('y')})\n"
 
     system_instruction = (
         "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi e biomeccanica. "
-        "Fornisci sempre risposte estremamente curate dal punto di vista della formattazione visiva: "
-        "usa generosamente elenchi puntati (*), grassetti (**...**) per evidenziare i dati chiave, "
-        "e sezioni titolate per suddividere l'analisi logica. "
-        "Basati rigorosamente sui dati della traccia, sulla serie temporale dettagliata, "
-        "sui marker biomeccanici, sugli angoli articolari calcolati e sulla conversazione."
+        "Fornisci sempre risposte curate con formattazione visiva: elenchi puntati (*), grassetti (**...**), "
+        "e sezioni titolate. Basati rigorosamente sui dati della traccia, sulla serie temporale e sui dati biomeccanici."
     )
 
     formatted_history = []
     initial_context_text = f"Dati di riferimento attuali: {context_summary} {timeseries_details}"
-    formatted_history.append(types.Content(role="user", parts=[types.Part.from_text(text=initial_context_text)]))
-    formatted_history.append(types.Content(role="model", parts=[types.Part.from_text(text="Dati ricevuti e indicizzazione temporale memorizzata correttamente.")]))
+    formatted_history.append(
+        types.Content(role="user", parts=[types.Part.from_text(text=initial_context_text)])
+    )
+    formatted_history.append(
+        types.Content(role="model", parts=[types.Part.from_text(text="Dati ricevuti e indicizzazione temporale memorizzata correttamente.")])
+    )
 
     recent_history = history[-6:] if len(history) > 6 else history
     for message in recent_history[:-1]:
         role = "user" if message.get("role") == "user" else "model"
         content_text = message.get("content", "")
         if content_text:
-            formatted_history.append(types.Content(role=role, parts=[types.Part.from_text(text=content_text[:1000])]))
+            formatted_history.append(
+                types.Content(role=role, parts=[types.Part.from_text(text=content_text[:1000])])
+            )
 
     max_retries = 3
     retry_delay = 1.5
@@ -173,7 +166,7 @@ def chat_gpx():
             if attempt == max_retries - 1:
                 answer = "I server di IA sono momentaneamente sovraccarichi (503). Riprova tra qualche istante."
             else:
-                answer = f"Analisi completata sui dati disponibili. ({error_str})"
+                answer = f"Analisi completata sui dati disponibili. (Nota: {error_str})"
 
     return jsonify({"answer": answer})
 
