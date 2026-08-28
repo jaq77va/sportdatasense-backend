@@ -110,7 +110,7 @@ def chat_gpx():
             for item in bio_series:
                 sec = item.get("second") or item.get("time") or "N/D"
                 markers = item.get("markers", [])
-                angle = item.get("angle_degrees", item.get("angle", None))
+                angle = item.get("angle", None)
                 
                 marker_strs = []
                 for m_idx, m_coords in enumerate(markers):
@@ -119,7 +119,7 @@ def chat_gpx():
                         my = m_coords.get("y", "N/D")
                         marker_strs.append(f"M{m_idx+1}(X={mx}, Y={my})")
                 
-                line_desc = f"- Secondo {sec}: "
+                line_desc = f"- Secondo {sec}s: "
                 if marker_strs:
                     line_desc += ", ".join(marker_strs)
                 if angle is not None:
