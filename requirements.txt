@@ -1,6 +1,4 @@
 fastapi==0.110.0
 uvicorn==0.28.0
-python-multipart==0.0.9
-fitparse==1.2.0
-gpxpy==1.6.2
 pydantic==2.6.4
+python-multipart==0.0.9
