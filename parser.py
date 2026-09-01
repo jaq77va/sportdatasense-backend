@@ -1,103 +1,142 @@
+# parsers.py - Modulo di parsing in-memory per FIT, TCX e GPX
 import io
-import datetime
 import xml.etree.ElementTree as ET
-from fitparse import FitFile
 import gpxpy
+import fitparse
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("SportDataSense-Parsers")
 
 def parse_telemetry_file(file_content: bytes, filename: str) -> dict:
     """
-    Parser professionale conforme alle specifiche ufficiali Garmin FIT SDK e TCX XSD.
-    Esegue l'elaborazione interamente in-memory (Zero Server Storage).
+    Analizza i file di telemetria (FIT, TCX, GPX) interamente in-memory,
+    senza scrivere alcun file su disco del server.
+    Restituisce un dizionario strutturato con le metriche estratte e i grafici disponibili.
     """
-    ext = filename.split('.')[-1].lower()
-    data = {
-        "filename": filename,
-        "format": ext,
-        "timestamps": [],
-        "heart_rate": [],
-        "power": [],
-        "cadence": [],
-        "altitude": [],
-        "distance": [],
-        "speed": [],
-        "available_metrics": []
-    }
+    ext = filename.lower().split('.')[-1]
+    logger.info(f"Inizio parsing in-memory per il file: {filename} (formato: {ext})")
+    
+    timestamps = []
+    heart_rate = []
+    power = []
+    cadence = []
+    altitude = []
+    distance = []
+    speed = []
 
     try:
         if ext == 'fit':
-            # Parsing file FIT binario ufficiale
-            fitfile = FitFile(io.BytesIO(file_content))
-            for record in fitfile.get_messages('record'):
-                rec = {field.name: field.value for field in record}
-                
-                ts = rec.get('timestamp')
-                if isinstance(ts, datetime.datetime):
-                    data["timestamps"].append(ts.isoformat())
-                else:
-                    data["timestamps"].append(str(ts) if ts else "")
-                
-                data["heart_rate"].append(rec.get('heart_rate') or rec.get('enhanced_heart_rate'))
-                data["power"].append(rec.get('power'))
-                data["cadence"].append(rec.get('cadence'))
-                data["altitude"].append(rec.get('altitude') or rec.get('enhanced_altitude'))
-                data["distance"].append(rec.get('distance'))
-                data["speed"].append(rec.get('speed') or rec.get('enhanced_speed'))
+            # Parsing file binario FIT Garmin
+            fit_file = fitparse.FitFile(io.BytesIO(file_content))
+            for record in fit_file.get_messages('record'):
+                data = {field.name: field.value for field in record}
+                if 'timestamp' in data and data['timestamp']:
+                    timestamps.append(str(data['timestamp']))
+                    heart_rate.append(data.get('heart_rate'))
+                    power.append(data.get('power'))
+                    cadence.append(data.get('cadence'))
+                    altitude.append(data.get('enhanced_altitude') or data.get('altitude'))
+                    distance.append(data.get('distance'))
+                    speed.append(data.get('enhanced_speed') or data.get('speed'))
+
+        elif ext == 'tcx':
+            # Parsing file XML TCX
+            tree = ET.parse(io.BytesIO(file_content))
+            root = tree.getroot()
+            # Namespace tipico TCX
+            ns = {'ns': 'http://www.garmin.com/xmlschemas/TrainingCenterDatabasev2.html'}
+            
+            # Cerca tutti i Trackpoint
+            for tp in root.iter():
+                # Rimuove il namespace per facilitare il match dei tag
+                tag = tp.tag.split('}')[-1]
+                if tag == 'Trackpoint':
+                    time_val, hr_val, pwr_val, cad_val, alt_val, dist_val = None, None, None, None, None, None
+                    for child in tp:
+                        c_tag = child.tag.split('}')[-1]
+                        if c_tag == 'Time':
+                            time_val = child.text
+                        elif c_tag == 'AltitudeMeters':
+                            alt_val = float(child.text) if child.text else None
+                        elif c_tag == 'DistanceMeters':
+                            dist_val = float(child.text) if child.text else None
+                        elif c_tag == 'HeartRateBpm':
+                            for sub in child:
+                                if sub.tag.split('}')[-1] == 'Value':
+                                    hr_val = int(sub.text) if sub.text else None
+                        elif c_tag == 'Cadence':
+                            cad_val = int(child.text) if child.text else None
+                        elif c_tag == 'Extensions':
+                            # Ricerca potenza nei blocchi estesi
+                            for ext_node in child.iter():
+                                if 'Watts' in ext_node.tag:
+                                    pwr_val = int(ext_node.text) if ext_node.text else None
+                    
+                    if time_val:
+                        timestamps.append(time_val)
+                        heart_rate.append(hr_val)
+                        power.append(pwr_val)
+                        cadence.append(cad_val)
+                        altitude.append(alt_val)
+                        distance.append(dist_val)
+                        speed.append(None) # Velocità derivata o assente nel singolo punto base
 
         elif ext == 'gpx':
-            # Parsing file GPX standard
+            # Parsing file GPX con gpxpy
             gpx = gpxpy.parse(file_content.decode('utf-8', errors='ignore'))
             for track in gpx.tracks:
                 for segment in track.segments:
                     for point in segment.points:
-                        data["timestamps"].append(point.time.isoformat() if point.time else "")
-                        data["altitude"].append(point.elevation)
-                        data["distance"].append(None)
-                        data["heart_rate"].append(None)
-                        data["power"].append(None)
-                        data["cadence"].append(None)
-                        data["speed"].append(point.speed)
+                        timestamps.append(str(point.time) if point.time else "")
+                        altitude.append(point.elevation)
+                        distance.append(None)
+                        speed.append(point.speed)
+                        
+                        # Controllo estensioni GPX per HR e Cadenza se presenti
+                        hr_val, cad_val, pwr_val = None, None, None
+                        if point.extensions:
+                            for ext in point.extensions:
+                                for child in ext:
+                                    tag_lower = child.tag.lower()
+                                    if 'hr' in tag_lower:
+                                        hr_val = int(child.text) if child.text else None
+                                    elif 'cad' in tag_lower:
+                                        cad_val = int(child.text) if child.text else None
+                                    elif 'power' in tag_lower or 'watts' in tag_lower:
+                                        pwr_val = int(child.text) if child.text else None
+                        heart_rate.append(hr_val)
+                        cadence.append(cad_val)
+                        power.append(pwr_val)
+        else:
+            raise ValueError(f"Formato file non supportato: {ext}")
 
-        elif ext == 'tcx':
-            # Parsing file TCX Garmin con gestione namespace
-            root = ET.fromstring(file_content)
-            ns = {
-                'ns': 'http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2',
-                'ns3': 'http://www.garmin.com/xmlschemas/ActivityExtension/v2'
+        # Identificazione delle metriche effettivamente presenti (non tutte None)
+        available_metrics = {
+            "heart_rate": any(v is not None for v in heart_rate),
+            "power": any(v is not None for v in power),
+            "cadence": any(v is not None for v in cadence),
+            "altitude": any(v is not None for v in altitude),
+            "speed": any(v is not None for v in speed)
+        }
+
+        logger.info(f"Parsing completato con successo. Metriche rilevate: {available_metrics}")
+
+        return {
+            "filename": filename,
+            "total_points": len(timestamps),
+            "available_metrics": available_metrics,
+            "data": {
+                "timestamps": timestamps,
+                "heart_rate": heart_rate,
+                "power": power,
+                "cadence": cadence,
+                "altitude": altitude,
+                "distance": distance,
+                "speed": speed
             }
-            
-            for trackpoint in root.iter('{http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2}Trackpoint'):
-                time_elem = trackpoint.find('ns:Time', ns)
-                hr_elem = trackpoint.find('ns:HeartRateBpm/ns:Value', ns)
-                dist_elem = trackpoint.find('ns:DistanceMeters', ns)
-                alt_elem = trackpoint.find('ns:AltitudeMeters', ns)
-                cad_elem = trackpoint.find('ns:Cadence', ns)
-                
-                power_val = None
-                extensions = trackpoint.find('ns:Extensions', ns)
-                if extensions is not None:
-                    tpx = extensions.find('.//ns3:Watts', ns)
-                    if tpx is not None:
-                        try:
-                            power_val = float(tpx.text)
-                        except ValueError:
-                            pass
-
-                data["timestamps"].append(time_elem.text if time_elem is not None else "")
-                data["heart_rate"].append(int(hr_elem.text) if hr_elem is not None else None)
-                data["distance"].append(float(dist_elem.text) if dist_elem is not None else None)
-                data["altitude"].append(float(alt_elem.text) if alt_elem is not None else None)
-                data["cadence"].append(int(cad_elem.text) if cad_elem is not None else None)
-                data["power"].append(power_val)
-                data["speed"].append(None)
-
-        # Mappatura delle metriche presenti
-        if any(v is not None for v in data["power"]): data["available_metrics"].append("power")
-        if any(v is not None for v in data["heart_rate"]): data["available_metrics"].append("heart_rate")
-        if any(v is not None for v in data["cadence"]): data["available_metrics"].append("cadence")
-        if any(v is not None for v in data["altitude"]): data["available_metrics"].append("altitude")
-        if any(v is not None for v in data["speed"]): data["available_metrics"].append("speed")
+        }
 
     except Exception as e:
-        data["error"] = f"Errore di parsing: {str(e)}"
-
-    return data
+        logger.error(f"Errore durante il parsing del file {filename}: {str(e)}", exc_info=True)
+        raise ValueError(f"Errore di elaborazione telemetrica: {str(e)}")
