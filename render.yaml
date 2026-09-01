@@ -2,8 +2,9 @@ services:
   - type: web
     name: sportdatasense-backend
     env: python
-    region: frankfurt  # Scegli la regione più vicina (es. Francoforte per l'Europa)
-    plan: free         # O il piano che preferisci (es. starter)
+    region: frankfurt
+    plan: free
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     autoDeploy: true
+
