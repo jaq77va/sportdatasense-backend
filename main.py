@@ -1,20 +1,14 @@
-# main.py - Server FastAPI Backend (Zero Server Storage)
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import logging
-from parsers import parse_telemetry_file
-
-# Configurazione logging avanzato
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("SportDataSense-Main")
+from typing import Optional, Dict, Any
 
 app = FastAPI(title="SportDataSense Backend", version="1.0.0")
 
-# Abilitazione CORS per permettere la comunicazione con WordPress
+# Configurazione CORS per permettere al frontend statico (su Render o locale) di comunicare con il server
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In produzione può essere ristretto al dominio sportdatasense.com
+    allow_origins=["*"],  # In produzione puoi limitarlo all'URL esatto del tuo frontend statico su Render
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,53 +16,59 @@ app.add_middleware(
 
 class AIChatRequest(BaseModel):
     query: str
-    session_summary: dict = None
+    session_summary: Optional[Dict[Any, Any]] = None
 
 @app.get("/")
 def read_root():
-    logger.info("Health check endpoint chiamato.")
-    return {"status": "online", "message": "SportDataSense Backend FastAPI operativo (In-Memory Processing)"}
+    return {"status": "online", "message": "SportDataSense Backend FastAPI attivo."}
 
 @app.post("/api/parse")
-async def parse_endpoint(file: UploadFile = File(...)):
-    """
-    Riceve il file telemetrico (FIT, TCX, GPX) ed esegue il parsing in-memory.
-    Nessun file viene salvato su disco.
-    """
-    logger.info(f"Ricevuta richiesta di parsing per il file: {file.filename}")
-    try:
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="Il file caricato è vuoto.")
-        
-        result = parse_telemetry_file(content, file.filename)
-        return result
-    except Exception as e:
-        logger.error(f"Errore nell'endpoint di parsing: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
-
-@app.post("/api/ai-chat")
-async def ai_chat_endpoint(req: AIChatRequest):
-    """
-    Gestisce l'interazione con l'assistente IA basandosi sul contesto della sessione corrente.
-    """
-    logger.info(faq_msg := f"Ricevuta richiesta AI Chat: {req.query}")
-    try:
-        # Simulazione di risposta contestuale intelligente basata sui dati in-memory
-        query_lower = req.query.lower()
-        response_text = "Analisi completata. I dati della sessione mostrano un buon profilo di carico."
-        
-        if "potenza" in query_lower or "power" in query_lower:
-            response_text = "L'analisi dei watt evidenzia picchi di erogazione stabili durante i segmenti principali. [Timestamp consigliato: 02:15]"
-        elif "frequenza" in query_lower or "cardiac" in query_lower or "hr" in query_lower:
-            response_text = "La frequenza cardiaca si mantiene prevalentemente in Zona 3-4, con un trend regolare. [Timestamp consigliato: 05:40]"
-        elif "carico" in query_lower:
-            response_text = "Il carico complessivo della sessione rientra nei parametri ottimali pianificati dal team."
+async def parse_telemetry_file(file: UploadFile = File(...)):
+    filename = file.filename.lower()
+    content = await file.read()
+    
+    # Esempio di logica di parsing basata sull'estensione del file (FIT, GPX, TCX, CSV, JSON)
+    if filename.endswith(('.gpx', '.fit', '.tcx', '.csv', '.json')):
+        # Qui inserisci i tuoi parser dedicati per estrarre serie temporali e metriche
+        # Restituiamo una struttura dati di esempio coerente con il frontend
+        mock_timestamps = list(range(0, 100))
+        mock_power = [150 + (i % 50) for i in range(100)]
+        mock_hr = [120 + (i % 20) for i in range(100)]
+        mock_cadence = [85 + (i % 10) for i in range(100)]
+        mock_altitude = [300 + (i * 2) for i in range(100)]
+        mock_speed = [25 + ((i % 10) * 0.2) for i in range(100)]
 
         return {
-            "status": "success",
-            "response": response_text
+            "filename": file.filename,
+            "available_metrics": {
+                "power": True,
+                "heart_rate": True,
+                "cadence": True,
+                "altitude": True,
+                "speed": True
+            },
+            "data": {
+                "timestamps": mock_timestamps,
+                "power": mock_power,
+                "heart_rate": mock_hr,
+                "cadence": mock_cadence,
+                "altitude": mock_altitude,
+                "speed": mock_speed
+            }
         }
-    except Exception as e:
-        logger.error(f"Errore nell'endpoint AI Chat: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    else:
+        raise HTTPException(status_code=400, detail="Formato file non supportato o non valido.")
+
+@app.post("/api/ai-chat")
+async def ai_chat_endpoint(payload: AIChatRequest):
+    user_query = payload.query.lower()
+    
+    # Logica di risposta basata sui dati della sessione o interazione generale
+    response_text = f"Ho analizzato la tua richiesta: '{payload.query}'. I dati della sessione sono pronti per essere valutati dal team."
+    
+    if "potenza" in user_query or "power" in user_query:
+        response_text = "Analizzando il profilo di potenza, la distribuzione dello sforzo rientra nei parametri ottimali della sessione."
+    elif "frequenza" in user_query or "hr" in user_query:
+        response_text = "I valori della frequenza cardiaca mostrano una buona stabilità cardiocircolatoria durante il carico di lavoro."
+
+    return {"response": response_text}
