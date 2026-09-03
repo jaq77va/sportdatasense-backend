@@ -13,7 +13,7 @@ client = genai.Client()
 
 @app.route("/")
 def home():
-    return "SportDataSense Backend v2.0 - Biomeccanica Avanzata (Coordinate + Angoli)"
+    return "SportDataSense Backend v2.0 - Biomeccanica Avanzata & Synchronized Viewer"
 
 @app.route("/process", methods=["POST"])
 def process_gpx():
