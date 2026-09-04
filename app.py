@@ -148,7 +148,7 @@ def chat_gpx():
     for attempt in range(3):
         try:
             chat = client.chats.create(
-                model='gemini-3.6-flash',
+                model='gemini-2.5-flash',
                 history=formatted_history,
                 config=types.GenerateContentConfig(system_instruction=system_instruction, temperature=0.2)
             )
