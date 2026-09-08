@@ -3,6 +3,8 @@ import gpxpy
 from flask_cors import CORS
 import os
 import time
+import math
+from datetime import datetime
 from google import genai
 from google.genai import types
 
@@ -10,6 +12,18 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 client = genai.Client()
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """
+    Calcola la distanza in chilometri tra due punti geografici usando la formula di Haversine.
+    """
+    R = 6371.0  # Raggio medio della Terra in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2 +
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
 
 def extract_extensions(element):
     """
@@ -51,25 +65,70 @@ def process_gpx():
 
     lat, lon, ele, times = [], [], [], []
     hr, cad, power, temp = [], [], [], []
+    
+    # Serie temporali e metriche per i grafici
+    distance = []      # Distanza progressiva in km (Profilo Altimetrico, Tempo vs Distanza)
+    speed = []         # Velocità istantanea in km/h
+    pace = []          # Passo istantaneo in min/km
+    elapsed_time = []  # Tempo trascorso in secondi dall'inizio
     logs = []
+
+    total_dist = 0.0
+    first_timestamp = None
 
     for track in gpx.tracks:
         for segment in track.segments:
-            for point in segment.points:
-                lat.append(point.latitude)
-                lon.append(point.longitude)
-                ele.append(point.elevation)
-                times.append(point.time.isoformat() if point.time else None)
-
-                h, c, p, t = None, None, None, None
+            for i, point in enumerate(segment.points):
+                curr_lat = point.latitude
+                curr_lon = point.longitude
+                curr_ele = point.elevation
                 
-                # Estrazione avanzata delle estensioni
+                # Conversione e gestione timestamp
+                p_time = point.time
+                p_time_str = p_time.isoformat() if p_time else None
+
+                if p_time:
+                    if first_timestamp is None:
+                        first_timestamp = p_time
+                    sec_elapsed = (p_time - first_timestamp).total_seconds()
+                else:
+                    sec_elapsed = 0 if not elapsed_time else elapsed_time[-1]
+
+                # Calcolo della distanza progressiva, velocità e passo
+                curr_speed = 0.0
+                curr_pace = 0.0
+
+                if i == 0 and len(distance) == 0:
+                    total_dist = 0.0
+                else:
+                    prev_lat = lat[-1]
+                    prev_lon = lon[-1]
+                    delta_d = haversine_distance(prev_lat, prev_lon, curr_lat, curr_lon)
+                    total_dist += delta_d
+
+                    if i > 0 and segment.points[i-1].time and p_time:
+                        time_diff = (p_time - segment.points[i-1].time).total_seconds()
+                        if time_diff > 0:
+                            curr_speed = delta_d / (time_diff / 3600.0)  # km/h
+                            if curr_speed > 0:
+                                curr_pace = 60.0 / curr_speed  # min/km
+
+                lat.append(curr_lat)
+                lon.append(curr_lon)
+                ele.append(curr_ele)
+                times.append(p_time_str)
+                distance.append(round(total_dist, 3))
+                speed.append(round(curr_speed, 2))
+                pace.append(round(curr_pace, 2))
+                elapsed_time.append(sec_elapsed)
+
+                # Estrazione avanzata e ricorsiva delle estensioni (HR, Cadence, Power, Temp)
+                h, c, p, t = None, None, None, None
                 if point.extensions:
                     exts = point.extensions if isinstance(point.extensions, list) else [point.extensions]
                     for ext in exts:
                         ext_data = extract_extensions(ext)
                         
-                        # Mappatura dei valori cercati
                         for key, val in ext_data.items():
                             if 'hr' in key or 'heartrate' in key:
                                 h = int(val) if isinstance(val, (int, float)) else h
@@ -85,9 +144,27 @@ def process_gpx():
                 power.append(p)
                 temp.append(t)
 
+    # Generazione coordinate tridimensionali per la Mappa 3D
+    map_3d_coordinates = [
+        {"lat": l, "lon": ln, "ele": e if e is not None else 0.0}
+        for l, ln, e in zip(lat, lon, ele)
+    ]
+
     return jsonify({
-        "lat": lat, "lon": lon, "ele": ele, "times": times,
-        "hr": hr, "cad": cad, "power": power, "temp": temp, "logs": logs
+        "lat": lat, 
+        "lon": lon, 
+        "ele": ele, 
+        "times": times,
+        "hr": hr, 
+        "cad": cad, 
+        "power": power, 
+        "temp": temp,
+        "distance": distance,                  # Profilo Altimetrico e Tempo vs Distanza
+        "speed": speed,                        # Velocità istantanea (km/h)
+        "pace": pace,                          # Passo (min/km)
+        "elapsed_time": elapsed_time,          # Tempo trascorso in secondi
+        "map_3d_coordinates": map_3d_coordinates, # Coordinate 3D per rendering mappa
+        "logs": logs
     })
 
 @app.route("/chat", methods=["POST"])
