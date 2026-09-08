@@ -11,6 +11,29 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 
 client = genai.Client()
 
+def extract_extensions(element):
+    """
+    Funzione ausiliaria per estrarre in modo ricorsivo i dati estesi dai tag GPX.
+    """
+    data = {}
+    if element is None:
+        return data
+        
+    for child in element:
+        tag = child.tag.split('}')[-1].lower() if '}' in child.tag else child.tag.lower()
+        if child.text and child.text.strip():
+            try:
+                if '.' in child.text:
+                    data[tag] = float(child.text)
+                else:
+                    data[tag] = int(child.text)
+            except ValueError:
+                data[tag] = child.text.strip()
+        
+        # Ricorsione sui nodi figli
+        data.update(extract_extensions(child))
+    return data
+
 @app.route("/")
 def home():
     return "SportDataSense Backend v2.0 - Biomeccanica Avanzata & Synchronized Viewer"
@@ -39,15 +62,23 @@ def process_gpx():
                 times.append(point.time.isoformat() if point.time else None)
 
                 h, c, p, t = None, None, None, None
+                
+                # Estrazione avanzata delle estensioni
                 if point.extensions:
                     exts = point.extensions if isinstance(point.extensions, list) else [point.extensions]
                     for ext in exts:
-                        for child in ext:
-                            tag = child.tag.lower()
-                            if 'hr' in tag: h = int(child.text)
-                            elif 'cad' in tag: c = int(child.text)
-                            elif 'power' in tag or 'watts' in tag: p = int(child.text)
-                            elif 'atemp' in tag or 'temp' in tag: t = float(child.text)
+                        ext_data = extract_extensions(ext)
+                        
+                        # Mappatura dei valori cercati
+                        for key, val in ext_data.items():
+                            if 'hr' in key or 'heartrate' in key:
+                                h = int(val) if isinstance(val, (int, float)) else h
+                            elif 'cad' in key or 'cadence' in key:
+                                c = int(val) if isinstance(val, (int, float)) else c
+                            elif 'power' in key or 'watts' in key:
+                                p = int(val) if isinstance(val, (int, float)) else p
+                            elif 'atemp' in key or 'temp' in key:
+                                t = float(val) if isinstance(val, (int, float)) else t
                 
                 hr.append(h)
                 cad.append(c)
