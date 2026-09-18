@@ -15,9 +15,6 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 client = genai.Client()
 
 def haversine_distance(lat1, lon1, lat2, lon2):
-    """
-    Calcola la distanza in chilometri tra due punti geografici usando la formula di Haversine.
-    """
     R = 6371.0  # Raggio medio della Terra in km
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -27,13 +24,9 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 def extract_extensions(element):
-    """
-    Funzione ausiliaria per estrarre in modo ricorsivo i dati estesi dai tag GPX.
-    """
     data = {}
     if element is None:
         return data
-        
     for child in element:
         tag = child.tag.split('}')[-1].lower() if '}' in child.tag else child.tag.lower()
         if child.text and child.text.strip():
@@ -44,13 +37,12 @@ def extract_extensions(element):
                     data[tag] = int(child.text)
             except ValueError:
                 data[tag] = child.text.strip()
-        
         data.update(extract_extensions(child))
     return data
 
 @app.route("/")
 def home():
-    return "SportDataSense Backend v2.1 - FIT & GPX Biomechanical Viewer"
+    return "SportDataSense Backend v2.2 - FIT/GPX & Biomechanical Synchronized Viewer"
 
 @app.route("/process", methods=["POST"])
 def process_track():
@@ -70,7 +62,6 @@ def process_track():
 
     try:
         if filename.endswith(".fit"):
-            # Parsing file .fit tramite fitparse
             fitfile = fitparse.FitFile(file.stream)
             for record in fitfile.get_messages('record'):
                 record_data = {}
@@ -78,7 +69,6 @@ def process_track():
                     if field.name and field.value is not None:
                         record_data[field.name] = field.value
 
-                # Estrazione coordinate (i file FIT salvano lat/lon in semicerchi, convertiamo in gradi se necessario)
                 raw_lat = record_data.get('position_lat')
                 raw_lon = record_data.get('position_long')
                 
@@ -88,7 +78,7 @@ def process_track():
                 p_time = record_data.get('timestamp')
 
                 if curr_lat is None or curr_lon is None:
-                    continue  # Salta i record senza coordinate geografiche valide
+                    continue
 
                 p_time_str = p_time.isoformat() if isinstance(p_time, datetime) else None
 
@@ -115,9 +105,9 @@ def process_track():
                             prev_time = datetime.fromisoformat(times[-1])
                             time_diff = (p_time - prev_time).total_seconds()
                             if time_diff > 0:
-                                curr_speed = delta_d / (time_diff / 3600.0)  # km/h
+                                curr_speed = delta_d / (time_diff / 3600.0)
                                 if curr_speed > 0:
-                                    curr_pace = 60.0 / curr_speed  # min/km
+                                    curr_pace = 60.0 / curr_speed
                         except Exception:
                             pass
 
@@ -134,9 +124,7 @@ def process_track():
                 cad.append(record_data.get('cadence') or record_data.get('fractional_cadence'))
                 power.append(record_data.get('power'))
                 temp.append(record_data.get('temperature'))
-
         else:
-            # Parsing file GPX standard
             gpx = gpxpy.parse(file.read().decode("utf-8"))
             for track in gpx.tracks:
                 for segment in track.segments:
@@ -200,9 +188,8 @@ def process_track():
                         cad.append(c)
                         power.append(p)
                         temp.append(t)
-
     except Exception as e:
-        return jsonify({"error": f"Errore durante il parsing del file: {str(e)}"}), 400
+        return jsonify({"error": str(e)}), 400
 
     map_3d_coordinates = [
         {"lat": l, "lon": ln, "ele": e if e is not None else 0.0}
@@ -210,29 +197,20 @@ def process_track():
     ]
 
     return jsonify({
-        "lat": lat, 
-        "lon": lon, 
-        "ele": ele, 
-        "times": times,
-        "hr": hr, 
-        "cad": cad, 
-        "power": power, 
-        "temp": temp,
-        "distance": distance,
-        "speed": speed,
-        "pace": pace,
-        "elapsed_time": elapsed_time,
-        "map_3d_coordinates": map_3d_coordinates,
+        "lat": lat, "lon": lon, "ele": ele, "times": times,
+        "hr": hr, "cad": cad, "power": power, "temp": temp,
+        "distance": distance, "speed": speed, "pace": pace,
+        "elapsed_time": elapsed_time, "map_3d_coordinates": map_3d_coordinates,
         "logs": logs
     })
 
 @app.route("/chat", methods=["POST"])
 def chat_track():
     req = request.json or {}
-    question = req.get("message", "")
+    question = req.get("question", "") or req.get("message", "")
     history = req.get("history", [])
-    gpx_data = req.get("gpx_data", {})
-    bio_data = req.get("biomechanic_data", None)
+    gpx_data = req.get("data", {}) or req.get("gpx_data", {})
+    bio_data = req.get("biomechanical_data", None) or req.get("biomechanic_data", None)
     
     elevations = gpx_data.get("ele", []) if gpx_data else []
     powers = gpx_data.get("power", []) if gpx_data else []
@@ -254,15 +232,14 @@ def chat_track():
     )
 
     system_instruction = (
-        "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi (GPX/FIT) e biomeccanica. "
-        "Fornisci sempre risposte curate con elenchi puntati (*), grassetti (**...**) e sezioni titolate. "
-        "Basati rigorosamente sui dati della traccia."
+        "Sei l'assistente esperto di Sport Data Sense, specializzato in analisi di dati sportivi (FIT/GPX) e biomeccanica. "
+        "Fornisci sempre risposte curate con elenchi puntati (*), grassetti (**...**) e sezioni titolate."
     )
 
     formatted_history = []
     initial_context_text = f"Dati di riferimento attuali: {context_summary}"
     formatted_history.append(types.Content(role="user", parts=[types.Part.from_text(text=initial_context_text)]))
-    formatted_history.append(types.Content(role="model", parts=[types.Part.from_text(text="Dati traccia memorizzati correttamente.")]))
+    formatted_history.append(types.Content(role="model", parts=[types.Part.from_text(text="Dati memorizzati correttamente.")]))
 
     recent_history = history[-6:] if len(history) > 6 else history
     for message in recent_history:
@@ -288,7 +265,7 @@ def chat_track():
             else:
                 time.sleep(1.5)
 
-    return jsonify({"reply": answer})
+    return jsonify({"answer": answer, "reply": answer})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
